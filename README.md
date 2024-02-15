@@ -22,16 +22,14 @@ To simply minimize the negative log-likelihood of a normal distribution on a giv
 from nodegamlss.sklearn import NodeGAMLSS
 
 model = NodeGAMLSS(
-    in_features=3,
-    objective="mse",
+    in_features=X.shape[1],
     family="normal",
     device="cpu",
     verbose=False,
-    problem="LSS",
-    max_steps=300,
-    lr=0.0001,
-    num_trees=25,
-    l2_lambda=0.01
+    max_steps=5000,
+    lr=0.001,
+    report_frequency=100,
+    num_trees=75,
 )
 
 
@@ -39,4 +37,26 @@ record = model.fit(X, y)
 ```
 
 See nodegamlss/distributions for implemented distributions.
-Note, that the visualizations are not yet implemented for most distributions and are still a work in progress.
+Note, that the visualizations are not yet prettified. Thus the visualizations are simply the NodeGAM visualization for each distributional parameter in order of the parameters as defined in the torch.distribution.
+
+```python
+fig, axes, df = model.visualize(X)
+```
+
+Visualize the loss and the evaluation metric simply via:
+
+
+```python
+plt.figure(figsize=[18, 6])
+plt.subplot(1, 2, 1)
+plt.plot(record['train_losses'])
+plt.title('Training Loss')
+plt.xlabel('Steps')
+plt.grid()
+plt.subplot(1, 2, 2)
+plt.plot(record['val_metrics'])
+plt.title('Validation Metrics')
+plt.xlabel('Steps in every 100 step')
+plt.grid()
+plt.show()
+```
