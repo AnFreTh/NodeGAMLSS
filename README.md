@@ -1,10 +1,11 @@
-# NODE GAM: Differentiable Generalized Additive Model for Interpretable Deep Learning: 
+## NODE-GAMLSS: Differentiable Additive Model for Interpretable Distributional Deep Learning: 
 
-NodeGAMLSS is an interpretable deep distributional learning GAM model based on the Node-GAM Paper and the NAMLSS Paper: 
+NodeGAMLSS is an interpretable deep distributional learning GAM model based on the Node-GAM framework and the NAMLSS/GAMLSS framework: 
 [NODE GAM: Differentiable Generalized Additive Model for Interpretable Deep Learning](https://arxiv.org/abs/2106.01613)
 [Neural Additive Models for Location Scale and Shape: A Framework for Interpretable Neural Regression Beyond the Mean](https://arxiv.org/pdf/2301.11862.pdf).
-In short, it trains a GAMLSS model by multi-layer differentiable trees to be accurate, interpretable, and 
-differentiable. The code is taken from the [Node-GAM Github](https://github.com/zzzace2000/nodegam/tree/main) implementation and adjusted to account for disrtibutional regression approaches.
+In short, it trains a GAMLSS model by multi-layer differentiable trees and minimizes the negative log-likelihood of a given distribution.
+The distributional parameter restrictions (e.g. postiive variance in a normal distribution) are handled in place.
+The code is taken from the [Node-GAM Github](https://github.com/zzzace2000/nodegam/tree/main) implementation and adjusted to account for distributional regression approaches.
 
 ## Installation
 
