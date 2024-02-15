@@ -27,7 +27,7 @@ from .utils import get_latest_file, check_numpy, process_in_chunks
 class Trainer(nn.Module):
     def __init__(
         self,
-        model,
+        models,
         family,
         experiment_name=None,
         problem="LSS",
@@ -63,17 +63,26 @@ class Trainer(nn.Module):
                         1. Only used when problem == 'pretrain'.
         """
         super().__init__()
-        self.model = model
+        self.models = models
         self.verbose = verbose
         self.lr = lr
         self.lr_warmup_steps = lr_warmup_steps
 
         # When using fp16, there are some params if not filtered out by requires_grad
         # will produce error
-        params = [p for p in self.model.parameters() if p.requires_grad]
+        params = []
         if opt_only_last_layer:
             print("Only optimize last layer!")
-            params = [self.model.last_w]
+            for model in self.models:
+                # Assuming each model has an attribute pointing to its last layer's parameters
+                params.extend([getattr(model, "last_layer_attr")])
+        else:
+            for model in self.models:
+                params.extend([p for p in model.parameters() if p.requires_grad])
+
+        self.opt = Optimizer(params, lr=self.lr, **optimizer_params)
+
+        # Initialize the optimizer with the collected parameters
         self.opt = Optimizer(params, lr=lr, **optimizer_params)
         self.step = 0
         self.n_last_checkpoints = n_last_checkpoints
@@ -97,7 +106,9 @@ class Trainer(nn.Module):
         self.experiment_path = os.path.join("logs", experiment_name)
 
         if fp16 and IS_AMP_EXISTS:
-            self.model, self.opt = amp.initialize(self.model, self.opt, opt_level="O1")
+            self.models, self.opt = [
+                amp.initialize(model, self.opt, opt_level="O1") for model in self.models
+            ]
         if warm_start:
             self.load_checkpoint()
 
@@ -105,8 +116,15 @@ class Trainer(nn.Module):
             self.freeze_steps = 0
             self.loss_function = None
 
-        else:
-            self.problem = "LSS"
+        elif problem == "regression":
+            self.loss_function = lambda y1, y2: F.mse_loss(y1.float(), y2.float())
+
+        elif problem == "LSS":
+            self.loss_function = lambda predictions, y_true: self.family.compute_loss(
+                predictions, y_true
+            )
+
+        self.problem = problem
 
     def save_checkpoint(self, tag=None, path=None, mkdir=True, **kwargs):
         assert (
@@ -131,21 +149,17 @@ class Trainer(nn.Module):
         # Sometimes happen there is a checkpoint already existing. Then overwrite!
         if pexists(path):
             os.remove(path)
-        torch.save(
-            OrderedDict(
-                [
-                    ("model", self.model.state_dict(**kwargs)),
-                    ("opt", self.opt.state_dict()),
-                    ("step", self.step),
-                ]
-                + (
-                    []
-                    if not (self.fp16 and IS_AMP_EXISTS)
-                    else [("amp", amp.state_dict())]
-                )
-            ),
-            path,
-        )
+
+        model_states = [model.state_dict() for model in self.models]
+        checkpoint = {
+            "models": model_states,
+            "opt": self.opt.state_dict(),
+            "step": self.step,
+        }
+        if self.fp16 and IS_AMP_EXISTS:
+            checkpoint["amp"] = amp.state_dict()
+
+        torch.save(checkpoint, path)
         if self.verbose:
             print("Saved " + path)
         return path
@@ -165,10 +179,12 @@ class Trainer(nn.Module):
             path = os.path.join(self.experiment_path, f"checkpoint_{tag}.pth")
 
         checkpoint = torch.load(path)
+        for model, state in zip(self.models, checkpoint["models"]):
+            model.load_state_dict(state, **kwargs)
 
-        self.model.load_state_dict(checkpoint["model"], **kwargs)
         self.opt.load_state_dict(checkpoint["opt"])
-        self.step = int(checkpoint["step"])
+        self.step = checkpoint["step"]
+
         if self.fp16 and IS_AMP_EXISTS and "amp" in checkpoint:
             amp.load_state_dict(checkpoint["amp"])
 
@@ -206,40 +222,64 @@ class Trainer(nn.Module):
     def average_checkpoints(self, tags=None, paths=None, out_tag="avg", out_path=None):
         assert (
             tags is None or paths is None
-        ), "please provide either tags or paths or nothing, not both"
+        ), "Please provide either tags or paths, not both."
         assert (
             out_tag is not None or out_path is not None
-        ), "please provide either out_tag or out_path or both, not nothing"
+        ), "Please provide either out_tag or out_path."
 
-        # Ensure paths are generated or transformed correctly
+        # Ensure paths are correctly generated or specified
         if paths is None:
-            if tags is not None:
-
+            if tags:
                 paths = [
                     os.path.join(self.experiment_path, f"checkpoint_{tag}.pth")
                     for tag in tags
                 ]
             else:
-                # Use the method to get the latest checkpoints with correct path handling
                 paths = self.get_latest_checkpoints(
                     pjoin(self.experiment_path, "checkpoint_temp_*").replace(":", "_"),
                     self.n_last_checkpoints,
                 )
 
-        # Load checkpoints and calculate the average
+        # Load checkpoints
         checkpoints = [torch.load(path) for path in paths]
-        averaged_ckpt = deepcopy(checkpoints[0])
-        for key in averaged_ckpt["model"]:
-            values = [ckpt["model"][key] for ckpt in checkpoints]
-            averaged_ckpt["model"][key] = sum(values) / len(values)
+
+        # Initialize a structure for the averaged model states
+        averaged_ckpts = [
+            deepcopy(checkpoints[0]["models"][i]) for i in range(len(self.models))
+        ]
+
+        # Iterate through each model's parameters and average them across checkpoints
+        for model_idx, _ in enumerate(self.models):
+            for param_key in averaged_ckpts[model_idx]:
+                # Aggregate the same parameter across all checkpoints for the current model
+                param_values = [
+                    ckpt["models"][model_idx][param_key] for ckpt in checkpoints
+                ]
+
+                # Average the parameter values and update the averaged checkpoint
+                averaged_ckpts[model_idx][param_key] = torch.mean(
+                    torch.stack(param_values, dim=0), dim=0
+                )
+
+        # Prepare the final averaged checkpoint dictionary
+        averaged_checkpoint = {
+            "models": averaged_ckpts,
+            "opt": checkpoints[0][
+                "opt"
+            ],  # Optionally, you might want to handle averaging or resetting optimizer states
+            "step": checkpoints[0][
+                "step"
+            ],  # Assuming step should be consistent across checkpoints; adjust as needed
+        }
 
         # Handle output path
         if out_path is None:
-            out_path = pjoin(self.experiment_path, f"checkpoint_{out_tag}.pth").replace(
-                ":", "_"
-            )
+            out_path = os.path.join(
+                self.experiment_path, f"checkpoint_{out_tag}.pth"
+            ).replace(":", "_")
 
-        torch.save(averaged_ckpt, out_path)
+        # Save the averaged checkpoint
+        torch.save(averaged_checkpoint, out_path)
         if self.verbose:
             print(f"Averaged checkpoint saved to {out_path}")
 
@@ -273,17 +313,20 @@ class Trainer(nn.Module):
             self.set_lr(cur_lr)
 
         if self.freeze_steps > 0 and self.step == 0 and update:
-            self.model.freeze_all_but_lastw()
+            for model in self.models:
+                model.freeze_all_but_lastw()
 
         if 0 < self.freeze_steps == self.step:
-            self.model.unfreeze()
+            for model in self.models:
+                model.unfreeze()
 
         x_batch, y_batch = batch
         x_batch = torch.as_tensor(x_batch, device=device)
         if not self.problem.startswith("pretrain"):  # Save some memory
             y_batch = torch.as_tensor(y_batch, device=device)
 
-        self.model.train()
+        for model in self.models:
+            model.train()
 
         # Read that it's faster...
         for group in self.opt.param_groups:
@@ -292,18 +335,31 @@ class Trainer(nn.Module):
         # self.opt.zero_grad()
 
         if not self.problem.startswith("pretrain"):  # Normal training
-            predictions, penalty = self.model(x_batch, return_outputs_penalty=True)
-            loss = self.family.compute_loss(predictions, y_batch).mean()
+            model_predictions = []
+            model_penalties = []
+
+            # Iterate over each model to get predictions and penalties
+            for model in self.models:
+                prediction, penalty = model(x_batch, return_outputs_penalty=True)
+                model_predictions.append(
+                    prediction.unsqueeze(-1)
+                )  # Add a new dimension to concatenate along
+                model_penalties.append(penalty)
+
+            # Concatenate predictions along the new dimension to get a shape of (n, k)
+            predictions = torch.cat(model_predictions, dim=-1)
+
+            # Sum the penalties
+            total_penalty = sum(model_penalties)
+
+            loss = self.loss_function(predictions, y_batch).mean()
 
         else:
-            x_masked, masks, masks_noise = self.mask_input(x_batch)
-            feature_masks = masks_noise if self.problem == "pretrain_recon2" else None
-            outputs, penalty = self.model(
-                x_masked, return_outputs_penalty=True, feature_masks=feature_masks
+            raise ValueError(
+                "please do not use pre-train objective for NodeGAMLSS as it is not yet implemented."
             )
-            loss = self.pretrain_loss(outputs, masks, x_batch)
 
-        loss += penalty
+        loss += total_penalty
 
         if self.fp16 and IS_AMP_EXISTS:
             with amp.scale_loss(loss, self.opt) as scaled_loss:
@@ -342,65 +398,39 @@ class Trainer(nn.Module):
 
         return loss
 
-    def evaluate_pretrain_loss(self, X_test, y_test, device, batch_size=4096):
-        X_test = torch.as_tensor(X_test, device=device)
-        self.model.train(False)
-        with torch.no_grad():
-            if self.problem.startswith("pretrain_recon"):  # no mask
-                outputs = process_in_chunks(self.model, X_test, batch_size=batch_size)
-                loss = ((outputs - X_test)) ** 2
-                loss = torch.mean(loss)
-            else:
-                raise NotImplementedError("Unknown problem: " + self.problem)
-
-        return loss.item()
-
-    def evaluate_classification_error(self, X_test, y_test, device, batch_size=4096):
-        """This is for evaluation of one or multi-class classification error rate."""
-        X_test = torch.as_tensor(X_test, device=device)
-        y_test = check_numpy(y_test)
-        self.model.train(False)
-        with torch.no_grad():
-            logits = process_in_chunks(self.model, X_test, batch_size=batch_size)
-            logits = check_numpy(logits)
-            if logits.ndim == 1:
-                pred = (logits >= 0).astype(int)
-            else:
-                pred = logits.argmax(axis=-1)
-            error_rate = (y_test != pred).mean()
-        return error_rate
-
-    def evaluate_negative_auc(self, X_test, y_test, device, batch_size=4096):
-        X_test = torch.as_tensor(X_test, device=device)
-        y_test = check_numpy(y_test)
-        self.model.train(False)
-        with torch.no_grad():
-            logits = process_in_chunks(self.model, X_test, batch_size=batch_size)
-            logits = check_numpy(logits)
-            auc = roc_auc_score(y_test, logits)
-
-        return -auc
-
     def evaluate_mse(self, X_test, y_test, device, batch_size=4096):
         X_test = torch.as_tensor(X_test, device=device)
         y_test = check_numpy(y_test)
-        self.model.train(False)
+        for model in self.models:
+            model.train(False)
         with torch.no_grad():
-            prediction = process_in_chunks(self.model, X_test, batch_size=batch_size)
+            prediction = process_in_chunks(
+                self.models[0], X_test, batch_size=batch_size
+            )
             prediction = check_numpy(prediction)
-            if prediction.shape[1] == 1:
-                error_rate = ((y_test - prediction) ** 2).mean()
-            else:
-                error_rate = ((y_test - prediction[:, 0]) ** 2).mean()
+        if prediction.ndim == 1 or (prediction.ndim == 2 and prediction.shape[1] == 1):
+            # This handles the case where 'prediction' is 1D or 2D with a single column
+            error_rate = (
+                (y_test - prediction.squeeze()) ** 2
+            ).mean()  # Use 'squeeze()' to ensure it works for both 1D and 2D cases
+        else:
+            # This handles the case where 'prediction' is 2D with more than one column
+            error_rate = ((y_test - prediction[:, 0]) ** 2).mean()
         error_rate = float(error_rate)  # To avoid annoying JSON unserializable bug
         return error_rate
 
     def evaluate_LSS(self, X_test, y_test, device, batch_size=4096):
         X_test = torch.as_tensor(X_test, device=device)
         y_test = check_numpy(y_test)
-        self.model.train(False)
+        for model in self.models:
+            model.train(False)
         with torch.no_grad():
-            prediction = process_in_chunks(self.model, X_test, batch_size=batch_size)
+            model_predictions = []
+            for model in self.models:
+                model_predictions.append(
+                    process_in_chunks(model, X_test, batch_size=batch_size)
+                )
+            prediction = np.array(model_predictions).T
             prediction = check_numpy(prediction)
             error_rate = self.family.evaluate_nll(prediction, y_test).mean()
         error_rate = float(error_rate)  # To avoid annoying JSON unserializable bug
@@ -409,9 +439,13 @@ class Trainer(nn.Module):
     def evaluate_multiple_mse(self, X_test, y_test, device, batch_size=4096):
         X_test = torch.as_tensor(X_test, device=device)
         y_test = check_numpy(y_test)
-        self.model.train(False)
+        for model in self.models:
+            model.train(False)
         with torch.no_grad():
-            prediction = process_in_chunks(self.model, X_test, batch_size=batch_size)
+            prediction = [
+                process_in_chunks(model, X_test, batch_size=batch_size)
+                for model in self.models
+            ]
             prediction = check_numpy(prediction)
             error_rate = ((y_test - prediction) ** 2).mean(axis=0)
         return error_rate.astype(float).tolist()
@@ -428,9 +462,13 @@ class Trainer(nn.Module):
         """
         X_test = torch.as_tensor(X_test, device=device)
         y_test = check_numpy(y_test)
-        self.model.train(False)
+        for model in self.models:
+            model.train(False)
         with torch.no_grad():
-            logits = process_in_chunks(self.model, X_test, batch_size=batch_size)
+            logits = [
+                process_in_chunks(model, X_test, batch_size=batch_size)
+                for model in self.models
+            ]
             y_test = torch.tensor(y_test, device=device)
 
             if logits.ndim == 1:
