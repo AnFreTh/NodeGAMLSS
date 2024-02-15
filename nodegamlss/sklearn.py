@@ -75,8 +75,8 @@ class NodeGAMLSSBase(object):
         report_frequency=20,
         fp16=0,
         device="cpu",
-        objective="negative_auc",
-        problem="classification",
+        objective="LSS",
+        problem="LSS",
         verbose=1,
     ):
         """NodeGAM Base."""
@@ -181,31 +181,34 @@ class NodeGAMLSSBase(object):
         # Initialize the architecture
         choice_fn = EM15Temp(max_temp=1.0, min_temp=0.01, steps=self.anneal_steps)
         the_arch = GAMBlock if self.arch == "GAM" else GAMAttBlock
-        self.model = the_arch(
-            in_features=X_train.shape[1],
-            num_trees=self.num_trees,
-            num_layers=self.num_layers,
-            num_classes=self.num_classes,
-            addi_tree_dim=self.addi_tree_dim,
-            depth=self.depth,
-            choice_function=choice_fn,
-            bin_function=entmoid15,
-            output_dropout=self.output_dropout,
-            last_dropout=self.last_dropout,
-            colsample_bytree=self.colsample_bytree,
-            selectors_detach=1,  # Save memory
-            add_last_linear=True,
-            ga2m=self.ga2m,
-            l2_lambda=self.l2_lambda,
-            **({} if self.arch == "GAM" else {"dim_att": self.dim_att}),
-        )
+        self.models = [
+            the_arch(
+                in_features=X_train.shape[1],
+                num_trees=self.num_trees,
+                num_layers=self.num_layers,
+                num_classes=1,
+                addi_tree_dim=self.addi_tree_dim,
+                depth=self.depth,
+                choice_function=choice_fn,
+                bin_function=entmoid15,
+                output_dropout=self.output_dropout,
+                last_dropout=self.last_dropout,
+                colsample_bytree=self.colsample_bytree,
+                selectors_detach=1,  # Save memory
+                add_last_linear=True,
+                ga2m=self.ga2m,
+                l2_lambda=self.l2_lambda,
+                **({} if self.arch == "GAM" else {"dim_att": self.dim_att}),
+            )
+            for _ in range(self.family.num_params)
+        ]
 
-        self.model.to(self.device)
+        [model.to(self.device) for model in self.models]
 
         step_callbacks = [choice_fn.temp_step_callback]
         optimizer_params = {"nus": (0.7, 1.0), "betas": (0.95, 0.998)}
         trainer = Trainer(
-            model=self.model,
+            models=self.models,
             family=self.family,
             experiment_name=self.name,
             warm_start=True,  # if True, will load latest checkpt in the saved dir logs/${name}
@@ -222,9 +225,14 @@ class NodeGAMLSSBase(object):
 
         # trigger data-aware init of the model
         with torch.no_grad():
-            _ = self.model(
-                torch.as_tensor(X_train[: (2 * self.batch_size)], device=self.device)
-            )
+            _ = [
+                model(
+                    torch.as_tensor(
+                        X_train[: (2 * self.batch_size)], device=self.device
+                    )
+                )
+                for model in self.models
+            ]
 
         train_losses, val_metrics = [], []
         best_err, best_step_err = np.inf, -1
@@ -329,7 +337,8 @@ class NodeGAMLSSBase(object):
         trainer.load_checkpoint(tag="best")
 
         # Clean up
-        self.model.train(False)
+        for model in self.models:
+            model.train(False)
         shutil.rmtree(os.path.join("logs", self.name), ignore_errors=True)
         del trainer
 
@@ -349,21 +358,21 @@ class NodeGAMLSSBase(object):
         Returns:
             df: a GAM dataframe with each row representing a GAM term.
         """
-        assert (
-            self.num_classes == 1
-        ), "The GAM visualization has not supported more than 1 class."
 
         if max_n_bins is not None and max_n_bins > 0:
             all_X = bin_data(all_X, max_n_bins=max_n_bins)
 
-        df = self.model.extract_additive_terms(
-            all_X,
-            norm_fn=self.preprocessor.transform,
-            y_mu=self.preprocessor.y_mu,
-            y_std=self.preprocessor.y_std,
-            device=self.device,
-            batch_size=2 * self.batch_size,
-        )
+        df = [
+            model.extract_additive_terms(
+                all_X,
+                norm_fn=self.preprocessor.transform,
+                y_mu=self.preprocessor.y_mu,
+                y_std=self.preprocessor.y_std,
+                device=self.device,
+                batch_size=2 * self.batch_size,
+            )
+            for model in self.models
+        ]
         return df
 
     def visualize(
@@ -384,9 +393,17 @@ class NodeGAMLSSBase(object):
         """
         df = self.get_GAM_df(X, max_n_bins=max_n_bins)
 
-        fig, axes = vis_GAM_effects({"model": df}, show_density=show_density)
+        figs = []
+        axes_list = []
 
-        return fig, axes, df
+        # Iterate over each DataFrame in the list 'df'
+        for d in df:
+            fig, axes = vis_GAM_effects({"model": d}, show_density=show_density)
+            figs.append(fig)
+            axes_list.append(axes)
+
+        # Now 'figs' contains all the figures, and 'axes_list' contains all the axes objects
+        return figs, axes_list, df
 
     def print(self, *args):
         self.verbose = True
@@ -432,7 +449,7 @@ class NodeGAMLSS(NodeGAMLSSBase):
         report_frequency=20,
         fp16=0,
         device="cuda",
-        objective="ce_loss",
+        objective="LSS",
         verbose=1,
         problem="LSS",
     ):
@@ -494,19 +511,21 @@ class NodeGAMLSS(NodeGAMLSSBase):
         if family == "normal":
             family = NormalDistribution()
         elif family == "poisson":
-            family == PoissonDistribution()
+            family = PoissonDistribution()
         elif family == "gamma":
             family = GammaDistribution()
         elif family == "studentt":
             family = StudentTDistribution()
         elif family == "negativebinom":
-            family == NegativeBinomialDistribution()
+            family = NegativeBinomialDistribution()
         elif family == "inversegamma":
-            family == InverseGammaDistribution()
+            family = InverseGammaDistribution()
         else:
             raise ValueError(
                 "family not in ['normal', 'poisson', 'gamma', 'studentt', 'negativebinom', 'inversegamma']"
             )
+
+        print(family)
 
         super().__init__(
             in_features=in_features,
@@ -558,11 +577,17 @@ class NodeGAMLSS(NodeGAMLSSBase):
         """
         assert isinstance(X, pd.DataFrame), "Has to be a dataframe."
 
-        self.model.train(False)
+        for model in self.models:
+            model.train(False)
 
         X_tr = self.preprocessor.transform(X)
         X_tr = torch.as_tensor(X_tr, device=self.device)
         with torch.no_grad():
-            logits = process_in_chunks(self.model, X_tr, batch_size=self.batch_size)
-            logits = check_numpy(logits)
-        return logits
+            model_predictions = []
+            for model in self.models:
+                model_predictions.append(
+                    process_in_chunks(model, X_tr, batch_size=self.batch_size)
+                )
+            prediction = np.array(model_predictions).T
+            prediction = check_numpy(prediction)
+        return prediction
