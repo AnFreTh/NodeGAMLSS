@@ -10,7 +10,7 @@ The code is taken from the [Node-GAM Github](https://github.com/zzzace2000/nodeg
 ## Installation
 
 ```bash
-pip install nodegamlss
+pip install git+https://github.com/AnFreTh/NodeGAMLSS.git
 ```
 
 ## NodeGAM Training
