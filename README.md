@@ -16,15 +16,26 @@ pip install nodegamlss
 
 ### Sklearn interface
 
-To simply use it on your dataset, just run:
+To simply minimize the negative log-likelihood of a normal distribution on a given dataset just use:
 ```python
 from nodegamlss.sklearn import NodeGAMLSS
 
-model = NodeGAMLSS( 
-    in_features=X.shape[1],
-    objective="LSS",
+model = NodeGAMLSS(
+    in_features=3,
+    objective="mse",
     family="normal",
-    )
+    device="cpu",
+    verbose=False,
+    problem="LSS",
+    max_steps=300,
+    lr=0.0001,
+    num_trees=25,
+    l2_lambda=0.01
+)
 
-model.fit(X, y)
+
+record = model.fit(X, y)
 ```
+
+See nodegamlss/distributions for implemented distributions.
+Note, that the visualizations are not yet implemented for most distributions and are still a work in progress.
