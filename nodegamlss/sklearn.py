@@ -31,6 +31,9 @@ from .distributions import (
     StudentTDistribution,
     PoissonDistribution,
     InverseGammaDistribution,
+    BetaDistribution,
+    DirichletDistribution,
+    CategoricalDistribution,
 )
 
 
@@ -75,8 +78,7 @@ class NodeGAMLSSBase(object):
         report_frequency=20,
         fp16=0,
         device="cpu",
-        objective="LSS",
-        problem="LSS",
+        eval_metric="LSS",
         verbose=1,
     ):
         """NodeGAM Base."""
@@ -84,13 +86,11 @@ class NodeGAMLSSBase(object):
         assert quantile_dist in ["normal", "uniform"], "Invalid dist: " + str(
             quantile_dist
         )
-        assert objective in [
+        assert eval_metric in [
             "ce_loss",
-            "negative_auc",
             "mse",
-            "error_rate",
             "LSS",
-        ], "Invalid objective: " + str(objective)
+        ], "Invalid eval metric: " + str(eval_metric)
 
         if name is None:
             name = "tmp_{}.{:0>2d}.{:0>2d}_{:0>2d}_{:0>2d}".format(*time.gmtime()[:5])
@@ -126,11 +126,9 @@ class NodeGAMLSSBase(object):
         self.report_frequency = report_frequency
         self.fp16 = fp16
         self.device = device
-        self.objective = objective
-        self.problem = problem
+        self.eval_metric = eval_metric
         self.verbose = verbose
         self.family = family
-
         self.preprocessor = None
 
     def fit(
@@ -161,11 +159,9 @@ class NodeGAMLSSBase(object):
         else:
             X_train, y_train = X, y
 
-        # Data
-        y_normalize = True if self.problem == "regression" else False
         self.preprocessor = MyPreprocessor(
             cat_features=self.cat_features,
-            y_normalize=y_normalize,  # True if regression, False for classification
+            y_normalize=False,  # True if regression, False for classification
             random_state=self.seed,
             quantile_transform=True,
             output_distribution=self.quantile_dist,
@@ -194,13 +190,13 @@ class NodeGAMLSSBase(object):
                 output_dropout=self.output_dropout,
                 last_dropout=self.last_dropout,
                 colsample_bytree=self.colsample_bytree,
-                selectors_detach=1,  # Save memory
+                selectors_detach=1,
                 add_last_linear=True,
                 ga2m=self.ga2m,
                 l2_lambda=self.l2_lambda,
                 **({} if self.arch == "GAM" else {"dim_att": self.dim_att}),
             )
-            for _ in range(self.family.num_params)
+            for _ in range(self.family.param_count)
         ]
 
         [model.to(self.device) for model in self.models]
@@ -220,7 +216,6 @@ class NodeGAMLSSBase(object):
             n_last_checkpoints=self.n_last_checkpoints,
             step_callbacks=step_callbacks,  # Temp annelaing
             fp16=self.fp16,
-            problem=self.problem,
         )
 
         # trigger data-aware init of the model
@@ -257,28 +252,19 @@ class NodeGAMLSSBase(object):
                 trainer.average_checkpoints(out_tag="avg")
                 trainer.load_checkpoint(tag="avg")
 
-                if self.objective == "negative_auc":
-                    err = trainer.evaluate_negative_auc(
+                if self.eval_metric == "LSS":
+                    err = trainer.evaluate_LSS(
                         X_val, y_val, device=self.device, batch_size=self.batch_size * 2
                     )
-                elif self.objective == "error_rate":
-                    err = trainer.evaluate_classification_error(
-                        X_val, y_val, device=self.device, batch_size=self.batch_size * 2
-                    )
-                elif self.objective == "ce_loss":
+                elif self.eval_metric == "ce_loss":
                     err = trainer.evaluate_ce_loss(
                         X_val, y_val, device=self.device, batch_size=self.batch_size * 2
                     )
-                elif self.objective == "mse":
+                elif self.eval_metric == "mse":
                     err = trainer.evaluate_mse(
                         X_val, y_val, device=self.device, batch_size=self.batch_size * 2
                     )
                     err *= self.preprocessor.y_std**2
-
-                elif self.objective == "LSS":
-                    err = trainer.evaluate_LSS(
-                        X_val, y_val, device=self.device, batch_size=self.batch_size * 2
-                    )
 
                 if err < best_err:
                     best_err = err
@@ -289,7 +275,7 @@ class NodeGAMLSSBase(object):
                 trainer.load_checkpoint()  # last
 
                 if is_first:
-                    self.print(f"Steps\tTrain Err\tVal Metric ({self.objective})")
+                    self.print(f"Steps\tTrain Err\tVal Metric ({self.eval_metric})")
                     is_first = False
                 self.print(
                     f"{trainer.step}\t{round(float(metrics['loss']), 4)}\t{round(float(err), 4)}"
@@ -449,9 +435,9 @@ class NodeGAMLSS(NodeGAMLSSBase):
         report_frequency=20,
         fp16=0,
         device="cuda",
-        objective="LSS",
         verbose=1,
-        problem="LSS",
+        eval_metric="mse",
+        **distribution_params,
     ):
         """A NodeGAM Classfier that follows sklearn interface to train.
 
@@ -508,28 +494,28 @@ class NodeGAMLSS(NodeGAMLSSBase):
         assert quantile_dist in ["normal", "uniform"], "Invalid dist: " + str(
             quantile_dist
         )
-        if family == "normal":
-            family = NormalDistribution()
-        elif family == "poisson":
-            family = PoissonDistribution()
-        elif family == "gamma":
-            family = GammaDistribution()
-        elif family == "studentt":
-            family = StudentTDistribution()
-        elif family == "negativebinom":
-            family = NegativeBinomialDistribution()
-        elif family == "inversegamma":
-            family = InverseGammaDistribution()
-        else:
-            raise ValueError(
-                "family not in ['normal', 'poisson', 'gamma', 'studentt', 'negativebinom', 'inversegamma']"
-            )
+        # Mapping from family names to their corresponding classes
+        distribution_classes = {
+            "normal": NormalDistribution,
+            "poisson": PoissonDistribution,
+            "gamma": GammaDistribution,
+            "beta": BetaDistribution,
+            "dirichlet": DirichletDistribution,
+            "studentt": StudentTDistribution,
+            "negativebinom": NegativeBinomialDistribution,
+            "inversegamma": InverseGammaDistribution,
+            "categorical": CategoricalDistribution,
+        }
 
-        print(family)
+        if family in distribution_classes:
+            # Pass additional distribution_params to the constructor of the distribution class
+            self.family = distribution_classes[family](**distribution_params)
+        else:
+            raise ValueError("Unsupported family: {}".format(family))
 
         super().__init__(
             in_features=in_features,
-            family=family,
+            family=self.family,
             cat_features=cat_features,
             validation_size=validation_size,
             quantile_dist=quantile_dist,
@@ -538,7 +524,7 @@ class NodeGAMLSS(NodeGAMLSSBase):
             seed=seed,
             arch=arch,
             ga2m=ga2m,
-            num_classes=family.num_params,
+            num_classes=self.family.param_count,
             num_trees=num_trees,
             num_layers=num_layers,
             depth=depth,
@@ -561,8 +547,7 @@ class NodeGAMLSS(NodeGAMLSSBase):
             report_frequency=report_frequency,
             fp16=fp16,
             device=device,
-            objective=objective,
-            problem=problem,
+            eval_metric=eval_metric,
             verbose=verbose,
         )
 
