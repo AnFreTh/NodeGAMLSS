@@ -47,6 +47,18 @@ class BaseDistribution:
     def compute_loss(self, predictions, y_true):
         raise NotImplementedError("Subclasses must implement this method.")
 
+    def evaluate_nll(self, y_true, y_pred):
+
+        # Convert numpy arrays to torch tensors
+        y_true_tensor = torch.tensor(y_true, dtype=torch.float32)
+        y_pred_tensor = torch.tensor(y_pred, dtype=torch.float32)
+
+        # Compute NLL using the provided loss function
+        nll_loss_tensor = self.compute_loss(y_true_tensor, y_pred_tensor)
+
+        # Convert the NLL loss tensor back to a numpy array and return
+        return nll_loss_tensor.detach().numpy()
+
 
 class NormalDistribution(BaseDistribution):
     def __init__(self, name="Normal", mean_transform="none", var_transform="positive"):
