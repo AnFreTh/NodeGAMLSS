@@ -412,8 +412,9 @@ class Trainer(nn.Module):
                     process_in_chunks(model, X_test, batch_size=batch_size)
                 )
             prediction = np.array(model_predictions).T
-            prediction = check_numpy(prediction)
-            error_rate = self.family.evaluate_nll(prediction, y_test).mean()
+            error_rate = self.family.evaluate_nll(
+                prediction, y_test, device=device
+            ).mean()
         error_rate = float(error_rate)  # To avoid annoying JSON unserializable bug
         return error_rate
 
