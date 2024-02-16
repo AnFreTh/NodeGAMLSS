@@ -30,7 +30,6 @@ class Trainer(nn.Module):
         models,
         family,
         experiment_name=None,
-        problem="LSS",
         warm_start=False,
         Optimizer=torch.optim.Adam,
         optimizer_params={},
@@ -112,19 +111,9 @@ class Trainer(nn.Module):
         if warm_start:
             self.load_checkpoint()
 
-        if problem.startswith("pretrain"):
-            self.freeze_steps = 0
-            self.loss_function = None
-
-        elif problem == "regression":
-            self.loss_function = lambda y1, y2: F.mse_loss(y1.float(), y2.float())
-
-        elif problem == "LSS":
-            self.loss_function = lambda predictions, y_true: self.family.compute_loss(
-                predictions, y_true
-            )
-
-        self.problem = problem
+        self.loss_function = lambda predictions, y_true: self.family.compute_loss(
+            predictions, y_true
+        )
 
     def save_checkpoint(self, tag=None, path=None, mkdir=True, **kwargs):
         assert (
@@ -322,8 +311,7 @@ class Trainer(nn.Module):
 
         x_batch, y_batch = batch
         x_batch = torch.as_tensor(x_batch, device=device)
-        if not self.problem.startswith("pretrain"):  # Save some memory
-            y_batch = torch.as_tensor(y_batch, device=device)
+        y_batch = torch.as_tensor(y_batch, device=device)
 
         for model in self.models:
             model.train()
@@ -332,32 +320,25 @@ class Trainer(nn.Module):
         for group in self.opt.param_groups:
             for p in group["params"]:
                 p.grad = None
-        # self.opt.zero_grad()
 
-        if not self.problem.startswith("pretrain"):  # Normal training
-            model_predictions = []
-            model_penalties = []
+        model_predictions = []
+        model_penalties = []
 
-            # Iterate over each model to get predictions and penalties
-            for model in self.models:
-                prediction, penalty = model(x_batch, return_outputs_penalty=True)
-                model_predictions.append(
-                    prediction.unsqueeze(-1)
-                )  # Add a new dimension to concatenate along
-                model_penalties.append(penalty)
+        # Iterate over each model to get predictions and penalties
+        for model in self.models:
+            prediction, penalty = model(x_batch, return_outputs_penalty=True)
+            model_predictions.append(
+                prediction.unsqueeze(-1)
+            )  # Add a new dimension to concatenate along
+            model_penalties.append(penalty)
 
-            # Concatenate predictions along the new dimension to get a shape of (n, k)
-            predictions = torch.cat(model_predictions, dim=-1)
+        # Concatenate predictions along the new dimension to get a shape of (n, k)
+        predictions = torch.cat(model_predictions, dim=-1)
 
-            # Sum the penalties
-            total_penalty = sum(model_penalties)
+        # Sum the penalties
+        total_penalty = sum(model_penalties)
 
-            loss = self.loss_function(predictions, y_batch).mean()
-
-        else:
-            raise ValueError(
-                "please do not use pre-train objective for NodeGAMLSS as it is not yet implemented."
-            )
+        loss = self.loss_function(predictions, y_batch).mean()
 
         loss += total_penalty
 
