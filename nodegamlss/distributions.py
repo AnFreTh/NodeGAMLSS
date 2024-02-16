@@ -77,7 +77,7 @@ class NormalDistribution(BaseDistribution):
             predictions[:, self.param_names.index("variance")]
         )
 
-        normal_dist = dist.Normal(mean, torch.sqrt(variance))
+        normal_dist = dist.Normal(mean, variance)
 
         nll = -normal_dist.log_prob(y_true).mean()
         return nll
