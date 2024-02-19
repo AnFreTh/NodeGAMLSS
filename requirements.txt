@@ -17,3 +17,5 @@ mat4py
 interpret>=0.2
 pygam
 seaborn
+dash
+plotly

@@ -1,14 +1,17 @@
-## NODE-GAMLSS: Differentiable Additive Model for Interpretable Distributional Deep Learning: 
 
-NodeGAMLSS is an interpretable deep distributional learning GAM model based on the Node-GAM framework and the NAMLSS/GAMLSS framework: 
-[NODE GAM: Differentiable Generalized Additive Model for Interpretable Deep Learning](https://arxiv.org/abs/2106.01613)
-[Neural Additive Models for Location Scale and Shape: A Framework for Interpretable Neural Regression Beyond the Mean](https://arxiv.org/pdf/2301.11862.pdf).
-In short, it trains a GAMLSS model by multi-layer differentiable trees and minimizes the negative log-likelihood of a given distribution.
-The distributional parameter restrictions (e.g. postiive variance in a normal distribution) are handled in place.
-The code is taken from the [Node-GAM Github](https://github.com/zzzace2000/nodegam/tree/main) implementation and adjusted to account for distributional regression approaches.
+## Nosw-GAMLSS: Differentiable Additive Model for Interpretable Distributional Deep Learning
 
-## Installation
+Node-GAMLSS integrates the Node-GAM framework and the NAMLSS/GAMLSS framework to train Generalized Additive Models for Location, Scale, and Shape (GAMLSS) using multi-layer differentiable trees. This model minimizes the negative log-likelihood for a variety of distributions, with built-in support for handling distributional parameter constraints. The implementation adapts the Node-GAM approach to accommodate distributional regression, making it suitable for deep learning applications that require interpretability. In short, it trains a GAMLSS model by multi-layer differentiable trees and minimizes the negative log-likelihood of a given distribution.
 
+
+Relevant Papers:
+- [Node-GAM: Differentiable Generalized Additive Model for Interpretable Deep Learning](https://arxiv.org/abs/2106.01613)
+- [Neural Additive Models for Location Scale and Shape: A Framework for Interpretable Neural Regression Beyond the Mean](https://arxiv.org/pdf/2301.11862.pdf).
+
+The codebase is inspired by and adapted from the [Node-GAM Github repository](https://github.com/zzzace2000/nodegam/tree/main).
+
+### Installation
+Install Node-GAMLSS directly from the repository using pip:
 ```bash
 pip install git+https://github.com/AnFreTh/NodeGAMLSS.git
 ```
@@ -24,7 +27,7 @@ from nodegamlss.model import NodeGAMLSS
 model = NodeGAMLSS(
     in_features=X.shape[1],
     family="normal",
-    device="cpu",
+    device="cpu", #or "cuda"
     verbose=False,
     max_steps=5000,
     lr=0.001,
@@ -35,8 +38,21 @@ model = NodeGAMLSS(
 
 record = model.fit(X, y)
 ```
+The "family" parameter defines the distribution that is used.
 
-See nodegamlss/distributions for implemented distributions.
+See nodegamlss/distributions for details regarding the distributions and their parameters.
+So far, the following distributions are implemented. Feel free to raise an Issue when crucial distributions are missing:
+1. Normal 
+2. Poisson 
+3. Gamma
+4. Inverse Gamm
+5. Dirichlet
+6. Beta
+7. StudentT
+8. Negative Binomial 
+9.  Categorical
+
+After fitting, the individual feature and parameter effects are easily visualizable.
 There are multiple ways to visualize the model.
 First, we can simply leverage the Node-GAM visualizations and create a Node-GAM-style plot for each parameter.
 
@@ -52,7 +68,7 @@ model.plot_single_feature_effects(X, parameter="mean")
 
 And the variance via:
 ```python
-model.plot_single_feature_effects(X, parameter="mean")
+model.plot_single_feature_effects(X, parameter="variance")
 ```
 
 The interaction plots are similarly created via:
@@ -60,7 +76,7 @@ The interaction plots are similarly created via:
 model.plot_interaction_effects(X, port=8051, parameter="mean")
 ```
 
-Furthermore, it is similar to Node-GAM easy and user-frinedly to visualize the loss and the evaluation metric simply via:
+Furthermore, it is similar to Node-GAM easy and user-friendly to visualize the loss and the evaluation metric simply via:
 ```python
 plt.figure(figsize=[18, 6])
 plt.subplot(1, 2, 1)
