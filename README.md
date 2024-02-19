@@ -19,7 +19,7 @@ pip install git+https://github.com/AnFreTh/NodeGAMLSS.git
 
 To simply minimize the negative log-likelihood of a normal distribution on a given dataset just use:
 ```python
-from nodegamlss.sklearn import NodeGAMLSS
+from nodegamlss.model import NodeGAMLSS
 
 model = NodeGAMLSS(
     in_features=X.shape[1],
@@ -37,15 +37,30 @@ record = model.fit(X, y)
 ```
 
 See nodegamlss/distributions for implemented distributions.
-Note, that the visualizations are not yet prettified. Thus the visualizations are simply the NodeGAM visualization for each distributional parameter in order of the parameters as defined in the torch.distribution.
+There are multiple ways to visualize the model.
+First, we can simply leverage the Node-GAM visualizations and create a Node-GAM-style plot for each parameter.
 
 ```python
-fig, axes, df = model.visualize(X)
+fig, axes, df = model.visualize_nodegam(X)
+```
+This will create as many plots as you have distributional parameters and then create for each feature and feature interaction a subplot.
+
+Additionally, you can create dash plots for each distributional parameter. E.g. for a normal distribution, you can visualize the mean predictions via:
+```python
+model.plot_single_feature_effects(X, parameter="mean")
 ```
 
-Visualize the loss and the evaluation metric simply via:
+And the variance via:
+```python
+model.plot_single_feature_effects(X, parameter="mean")
+```
 
+The interaction plots are similarly created via:
+```python
+model.plot_interaction_effects(X, port=8051, parameter="mean")
+```
 
+Furthermore, it is similar to Node-GAM easy and user-frinedly to visualize the loss and the evaluation metric simply via:
 ```python
 plt.figure(figsize=[18, 6])
 plt.subplot(1, 2, 1)

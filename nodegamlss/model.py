@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import torch
 from qhoptim.pyt import QHAdam
-from scipy.special import softmax
 from sklearn.model_selection import train_test_split
 
 from .arch import GAMBlock, GAMAttBlock
@@ -22,8 +21,8 @@ from .gams.utils import bin_data
 from .mypreprocessor import MyPreprocessor
 from .nn_utils import EM15Temp, entmoid15
 from .trainer import Trainer
-from .utils import iterate_minibatches, process_in_chunks, check_numpy, sigmoid_np
-from .vis_utils import vis_GAM_effects
+from .utils import iterate_minibatches, process_in_chunks, check_numpy
+from .vis_utils import vis_GAM_effects, _plot_single_features, _plot_interaction_effects
 from .distributions import (
     NormalDistribution,
     NegativeBinomialDistribution,
@@ -361,7 +360,7 @@ class NodeGAMLSSBase(object):
         ]
         return df
 
-    def visualize(
+    def visualize_nodegam(
         self, X: pd.DataFrame, max_n_bins: int = 256, show_density: bool = False
     ):
         """Visualize the GAM graph.
@@ -390,6 +389,29 @@ class NodeGAMLSSBase(object):
 
         # Now 'figs' contains all the figures, and 'axes_list' contains all the axes objects
         return figs, axes_list, df
+
+    def plot_single_feature_effects(
+        self,
+        X: pd.DataFrame,
+        parameter: str,
+        max_n_bins: int = 256,
+        port: int = 8050,
+    ):
+        assert (
+            parameter in self.family.param_names
+        ), f"please pass a distributional parameter name of the chosen distribution, {self.family.name} Choose one of {self.family.param_names}"
+        df = self.get_GAM_df(X, max_n_bins=max_n_bins)
+        df = df[self.family.param_names.index(parameter)]
+
+        _plot_single_features({"model": df}, port=port, parameter_name=parameter)
+
+    def plot_interaction_effects(
+        self, X: pd.DataFrame, parameter: str, max_n_bins: int = 256, port: int = 8051
+    ):
+        df = self.get_GAM_df(X, max_n_bins=max_n_bins)
+        df = df[self.family.param_names.index(parameter)]
+
+        _plot_interaction_effects({"model": df}, port=port, parameter_name=parameter)
 
     def print(self, *args):
         self.verbose = True
