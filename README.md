@@ -45,7 +45,7 @@ So far, the following distributions are implemented. Feel free to raise an Issue
 1. Normal 
 2. Poisson 
 3. Gamma
-4. Inverse Gamm
+4. Inverse Gamma
 5. Dirichlet
 6. Beta
 7. StudentT
