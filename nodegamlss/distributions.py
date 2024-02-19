@@ -54,10 +54,12 @@ class BaseDistribution:
         y_pred_tensor = torch.tensor(y_pred, dtype=torch.float32)
 
         # Compute NLL using the provided loss function
-        nll_loss_tensor = self.compute_loss(y_true_tensor, y_pred_tensor)
+        nll_loss_tensor = self.compute_loss(y_pred_tensor, y_true_tensor)
 
         # Convert the NLL loss tensor back to a numpy array and return
-        return nll_loss_tensor.detach().numpy()
+        return {
+            "NLL": nll_loss_tensor.detach().numpy(),
+        }
 
 
 class NormalDistribution(BaseDistribution):
@@ -82,6 +84,33 @@ class NormalDistribution(BaseDistribution):
         nll = -normal_dist.log_prob(y_true).mean()
         return nll
 
+    def evaluate_nll(self, y_true, y_pred):
+
+        metrics = super().evaluate_nll(y_true, y_pred)
+
+        # Convert numpy arrays to torch tensors
+        y_true_tensor = torch.tensor(y_true, dtype=torch.float32)
+        y_pred_tensor = torch.tensor(y_pred, dtype=torch.float32)
+
+        mse_loss = torch.nn.functional.mse_loss(
+            y_true_tensor, y_pred_tensor[:, self.param_names.index("mean")]
+        )
+        rmse = np.sqrt(mse_loss.detach().numpy())
+        mae = (
+            torch.nn.functional.l1_loss(
+                y_true_tensor, y_pred_tensor[:, self.param_names.index("mean")]
+            )
+            .detach()
+            .numpy()
+        )
+
+        metrics["mse"] = mse_loss.detach().numpy()
+        metrics["mae"] = mae
+        metrics["rmse"] = rmse
+
+        # Convert the NLL loss tensor back to a numpy array and return
+        return metrics
+
 
 class PoissonDistribution(BaseDistribution):
     def __init__(self, name="Poisson", rate_transform="positive"):
@@ -99,6 +128,30 @@ class PoissonDistribution(BaseDistribution):
         # Compute the negative log-likelihood
         nll = -poisson_dist.log_prob(y_true).mean()
         return nll
+
+    def evaluate_nll(self, y_true, y_pred):
+
+        metrics = super().evaluate_nll(y_true, y_pred)
+
+        # Convert numpy arrays to torch tensors
+        y_true_tensor = torch.tensor(y_true, dtype=torch.float32)
+        y_pred_tensor = torch.tensor(y_pred, dtype=torch.float32)
+        rate = self.rate_transform(y_pred_tensor[:, self.param_names.index("rate")])
+
+        mse_loss = torch.nn.functional.mse_loss(y_true_tensor, rate)
+        rmse = np.sqrt(mse_loss.detach().numpy())
+        mae = torch.nn.functional.l1_loss(y_true_tensor, rate).detach().numpy()
+        poisson_deviance = 2 * torch.sum(
+            y_true_tensor * torch.log(y_true_tensor / rate) - (y_true_tensor - rate)
+        )
+
+        metrics["mse"] = mse_loss.detach().numpy()
+        metrics["mae"] = mae
+        metrics["rmse"] = rmse
+        metrics["poisson_deviance"] = poisson_deviance.detach().numpy()
+
+        # Convert the NLL loss tensor back to a numpy array and return
+        return metrics
 
 
 class InverseGammaDistribution(BaseDistribution):
@@ -221,6 +274,33 @@ class StudentTDistribution(BaseDistribution):
 
         nll = -student_t_dist.log_prob(y_true).mean()
         return nll
+
+    def evaluate_nll(self, y_true, y_pred):
+
+        metrics = super().evaluate_nll(y_true, y_pred)
+
+        # Convert numpy arrays to torch tensors
+        y_true_tensor = torch.tensor(y_true, dtype=torch.float32)
+        y_pred_tensor = torch.tensor(y_pred, dtype=torch.float32)
+
+        mse_loss = torch.nn.functional.mse_loss(
+            y_true_tensor, y_pred_tensor[:, self.param_names.index("loc")]
+        )
+        rmse = np.sqrt(mse_loss.detach().numpy())
+        mae = (
+            torch.nn.functional.l1_loss(
+                y_true_tensor, y_pred_tensor[:, self.param_names.index("loc")]
+            )
+            .detach()
+            .numpy()
+        )
+
+        metrics["mse"] = mse_loss.detach().numpy()
+        metrics["mae"] = mae
+        metrics["rmse"] = rmse
+
+        # Convert the NLL loss tensor back to a numpy array and return
+        return metrics
 
 
 class NegativeBinomialDistribution(BaseDistribution):

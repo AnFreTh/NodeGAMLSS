@@ -408,22 +408,17 @@ class Trainer(nn.Module):
         with torch.no_grad():
             model_predictions = []
             for model in self.models:
-                # Get predictions for each model and ensure they are on the CPU before converting to numpy
                 model_prediction = process_in_chunks(
                     model, X_test, batch_size=batch_size
                 )
                 model_predictions.append(model_prediction.cpu())  # Move to CPU here
 
-            # Now it's safe to convert to a numpy array since all tensors are on the CPU
             prediction = np.array([pred.numpy() for pred in model_predictions]).T
-
-            # Ensure y_test is a numpy array and on the CPU
             y_test = check_numpy(y_test)
 
-            # Compute the error rate using the family's evaluate_nll method
-            error_rate = self.family.evaluate_nll(prediction, y_test).mean()
-        error_rate = float(error_rate)  # To avoid annoying JSON unserializable bug
-        return error_rate
+            # Now returns a dictionary of metrics
+            metrics = self.family.evaluate_nll(y_test, prediction)
+        return metrics
 
     def evaluate_multiple_mse(self, X_test, y_test, device, batch_size=4096):
         X_test = torch.as_tensor(X_test, device=device)
