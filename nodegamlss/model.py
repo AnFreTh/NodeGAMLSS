@@ -244,43 +244,46 @@ class NodeGAMLSSBase(object):
                 trainer.average_checkpoints(out_tag="avg")
                 trainer.load_checkpoint(tag="avg")
 
-            metrics = trainer.evaluate_LSS(
-                X_val, y_val, device=self.device, batch_size=self.batch_size * 2
-            )
+                metrics = trainer.evaluate_LSS(
+                    X_val, y_val, device=self.device, batch_size=self.batch_size * 2
+                )
 
-            # Extract the primary metric's value for decision making
-            primary_metric_value = metrics["NLL"]
+                # Extract the primary metric's value for decision making
+                primary_metric_value = metrics["NLL"]
 
-            if primary_metric_value < best_err:
-                best_err = primary_metric_value
-                best_step_err = trainer.step
-                trainer.save_checkpoint(tag="best")
+                if primary_metric_value < best_err:
+                    best_err = primary_metric_value
+                    best_step_err = trainer.step
+                    trainer.save_checkpoint(tag="best")
 
-            # Append all metrics for this validation to val_metrics for later analysis
-            val_metrics.append(metrics)
+                # Append all metrics for this validation to val_metrics for later analysis
+                val_metrics.append(metrics)
 
-            trainer.load_checkpoint()  # Load the last checkpoint
+                trainer.load_checkpoint()  # Load the last checkpoint
 
-            # Assuming 'metric_names' contains the names of all the metrics including 'LSS'
-            metric_names = ["NLL"] + [
-                metric for metric in metrics.keys() if metric != "NLL"
-            ]
+                # Assuming 'metric_names' contains the names of all the metrics including 'LSS'
+                metric_names = ["NLL"] + [
+                    metric for metric in metrics.keys() if metric != "NLL"
+                ]
 
-            headers = f"{'Step':<10}\t" + "\t".join(
-                [f"{metric:<15}" for metric in metric_names]
-            )
+                headers = f"{'Step':<10}\t" + "\t".join(
+                    [f"{metric:<15}" for metric in metric_names]
+                )
 
-            # Prepare values aligned under their respective headers, matching the spacing
-            values = f"{trainer.step:<10}\t" + "\t".join(
-                [f"{round(float(metrics[metric]), 4):<15}" for metric in metric_names]
-            )
+                # Prepare values aligned under their respective headers, matching the spacing
+                values = f"{trainer.step:<10}\t" + "\t".join(
+                    [
+                        f"{round(float(metrics[metric]), 4):<15}"
+                        for metric in metric_names
+                    ]
+                )
 
-            # Print headers and values
-            if is_first:
-                self.print(headers)  # Print headers only once
-                is_first = False
+                # Print headers and values
+                if is_first:
+                    self.print(headers)  # Print headers only once
+                    is_first = False
 
-            self.print(values)
+                self.print(values)
 
             # Stop training at least after the steps for temperature annealing
             if (
