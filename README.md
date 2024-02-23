@@ -1,5 +1,5 @@
 
-## Nosw-GAMLSS: Differentiable Additive Model for Interpretable Distributional Deep Learning
+## Node-GAMLSS: Differentiable Additive Model for Interpretable Distributional Deep Learning
 
 Node-GAMLSS integrates the Node-GAM framework and the NAMLSS/GAMLSS framework to train Generalized Additive Models for Location, Scale, and Shape (GAMLSS) using multi-layer differentiable trees. This model minimizes the negative log-likelihood for a variety of distributions, with built-in support for handling distributional parameter constraints. The implementation adapts the Node-GAM approach to accommodate distributional regression, making it suitable for deep learning applications that require interpretability. In short, it trains a GAMLSS model by multi-layer differentiable trees and minimizes the negative log-likelihood of a given distribution.
 
